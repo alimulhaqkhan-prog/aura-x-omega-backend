@@ -1,48 +1,55 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import OpenAI from "openai";
+// =====================
+// AURA-X Ω BACKEND v3
+// =====================
 
-dotenv.config();
+const express = require("express");
+const cors = require("cors");
+require("dotenv").config();
 
 const app = express();
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 
-// Root test route
-app.get("/", (req, res) => {
-  res.json({ status: "AURA-X Ω Backend Running" });
+// ----------------------
+// 🔥 HEALTH CHECK
+// ----------------------
+app.get("/health", (req, res) => {
+  res.json({ status: "OK", engine: "AURA-X Ω backend live" });
 });
 
-// Chat route
-app.post("/api/chat", async (req, res) => {
+// ----------------------
+// 🔥 MAIN LLM ENDPOINT
+// ----------------------
+app.post("/api/ask", async (req, res) => {
   try {
-    const { message, model } = req.body;
+    const userMsg = req.body.message || "";
 
-    if (!message) {
-      return res.status(400).json({ error: "Message is required" });
-    }
+    // Dummy emotional meta (backend can upgrade later)
+    const polarity = Math.random() > 0.5 ? "Positive" : "Negative";
+    const intensity = (Math.random() * 100).toFixed(0);
+    const tone = polarity === "Positive" ? "Warm" : "Cool";
 
-    const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-
-    const completion = await client.responses.create({
-      model: model || "gpt-4o-mini",
-      input: message,
-    });
+    const reply = `AURA-X Ω received: "${userMsg}". Emotional continuity maintained.`;
 
     res.json({
-      reply: completion.output_text || "No reply received",
+      reply,
+      meta: {
+        polarity,
+        intensity,
+        tone,
+      }
     });
-  } catch (error) {
-    console.error("Chat Error:", error);
-    res.status(500).json({ error: "LLM processing failed" });
+
+  } catch (err) {
+    console.error("Backend Error:", err);
+    res.status(500).json({ error: "Server crash in /api/ask" });
   }
 });
 
-// Start server
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`AURA-X backend running on port ${port}`);
-});
+// ----------------------
+// 🔥 SERVER START
+// ----------------------
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () =>
+  console.log(`AURA-X backend running on port ${PORT}`)
+);
