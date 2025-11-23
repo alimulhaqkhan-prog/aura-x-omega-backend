@@ -1,100 +1,101 @@
-// server.js  (CommonJS style – Render پر سیدھا چلے گا)
+// server.js
+// AURA-X Ω – Simple Emotional Reactor Backend (Demo, no API key needed)
+
 const express = require("express");
 const cors = require("cors");
-const OpenAI = require("openai");
 
 const app = express();
+const PORT = process.env.PORT || 10000;
+
+// Middlewares
 app.use(cors());
 app.use(express.json());
 
-// 🔑  Render Dashboard → Environment → OPENAI_API_KEY = تمہارا نیا sk-proj... key
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Helper: tiny sentiment estimate from text
+function basicSentimentScore(text) {
+  const t = (text || "").toLowerCase();
 
-// GET /  — simple health check
-app.get("/", (req, res) => {
-  res.json({
-    ok: false,
-    message: "Use POST /api/react with JSON body. This endpoint is for the AURA-X Ω frontend.",
-  });
-});
+  const posWords = ["love", "shukr", "thanks", "grateful", "hope", "happy",
+    "alhamdulillah", "good", "great", "amazing", "wonderful"];
+  const negWords = ["sad", "depressed", "angry", "hate", "lonely",
+    "fear", "scared", "anxious", "anxiety", "stress", "stressed", "hurt"];
 
-// POST /api/react — main LLM endpoint
+  let score = 0;
+  posWords.forEach(w => { if (t.includes(w)) score += 1; });
+  negWords.forEach(w => { if (t.includes(w)) score -= 1; });
+
+  return score; // -N … +N
+}
+
+// Main route: /api/react
 app.post("/api/react", async (req, res) => {
   try {
     const {
       userText = "",
       seedReply = "",
       analysis = {},
-      tm,
-      bm,
-      D,
-      Csum,
-      lambdaFaith,
-      lambdaSys,
-      E0,
+      tm = 0.3,
+      bm = 0.5,
+      D = 0,
+      Csum = 0,
+      lambdaFaith = 0,
+      lambdaSys = 0.02,
+      E0 = 0,
       faithLens = "None",
-      llmModel,
+      llmModel = "local-demo"
     } = req.body || {};
 
-    const model = llmModel || "gpt-4.1-mini"; // چاہو تو "gpt-4.1" بھی کر سکتے ہو
+    const baseScore = basicSentimentScore(userText);
+    const localE0 = Math.max(-1, Math.min(1,
+      E0 + baseScore * 0.1 + (analysis.sentiment || 0) * 0.15
+    ));
 
-    const systemPrompt = `
-You are AURA-X Ω, an "emotional continuity reactor" created by Alim ul Haq from Timergara, Pakistan.
+    let polarity;
+    if (localE0 > 0.15) polarity = "Positive";
+    else if (localE0 < -0.15) polarity = "Negative";
+    else polarity = "Neutral";
 
-Your job:
-- Respect the existing seed reply and emotional math (TM, BM, D, λ_faith, λ_sys, ΣCₜ, E₀).
-- Give one short, clear answer (2–6 lines) that feels emotionally stable, kind and analytical.
-- Do NOT talk about APIs, JSON, keys or servers.
-- You may briefly refer to E₀ or continuity, but stay human-friendly.
-Answer in the same language the user used (Urdu/English mix is OK).
-    `.trim();
+    let faithLine = "";
+    if (faithLens && faithLens !== "None") {
+      faithLine = `\n\n[Faith lens active: ${faithLens}. This line is shaped by your selected belief preset, but still under universal ethics.]`;
+    }
 
-    const userPrompt = `
-User text:
-${userText}
-
-Seed reply (local emotional reactor):
-${seedReply}
-
-Emotional parameters:
-TM=${tm}, BM=${bm}, D=${D}, Csum=${Csum},
-lambda_faith=${lambdaFaith}, lambda_sys=${lambdaSys}, E0=${E0},
-Faith lens: ${faithLens}
-
-Using all this, improve the seed reply.
-Keep the same main meaning, but make it more clear, gentle and helpful.
-Return ONLY the final answer text, nothing else.
-    `.trim();
-
-    const completion = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      max_tokens: 400,
-      temperature: 0.7,
-    });
+    let extraLine = "";
+    if (polarity === "Positive") {
+      extraLine = "Your emotional field is leaning to the positive side. Try to bookmark this moment as a BM node you can revisit later.";
+    } else if (polarity === "Negative") {
+      extraLine = "I can feel a heavier pattern here. Instead of running away from it, we try to decode it slowly and reduce D (damage) over time.";
+    } else {
+      extraLine = "This feels like a mixed or balanced state. Not every moment is extreme — neutrality also protects your long-run continuity.";
+    }
 
     const reply =
-      completion.choices?.[0]?.message?.content?.trim() ||
-      seedReply ||
-      "I could not improve this answer, but your emotional continuity is still safe.";
+      seedReply.trim() +
+      "\n\n[Local AURA-X Ω backend note]" +
+      `\n• Approx E₀: ${localE0.toFixed(2)} (from TM/BM + basic sentiment)` +
+      `\n• Polarity: ${polarity}` +
+      `\n• Engine: ${llmModel} (demo, local only)` +
+      `\n\n${extraLine}` +
+      faithLine;
 
-    res.json({ ok: true, reply });
+    return res.json({ reply });
   } catch (err) {
-    console.error("Error in /api/react:", err);
-    res.status(500).json({
-      ok: false,
-      error: err.message || "Unknown error in emotional backend.",
+    console.error("AURA-X backend error:", err);
+    return res.status(200).json({
+      reply:
+        "Backend caught an internal error but recovered safely. " +
+        "You can continue; TM/BM continuity is not lost. " +
+        `\n\n[Error detail: ${err.message}]`
     });
   }
 });
 
-// Render will use this port
-const PORT = process.env.PORT || 10000;
+// Health check
+app.get("/", (req, res) => {
+  res.send("AURA-X Ω backend is live (demo mode).");
+});
+
+// Start server
 app.listen(PORT, () => {
   console.log(`AURA-X Ω backend listening on port ${PORT}`);
 });
