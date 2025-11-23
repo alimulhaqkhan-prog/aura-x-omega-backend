@@ -2,17 +2,14 @@
   "name": "aura-x-omega-backend",
   "version": "1.0.0",
   "description": "AURA-X Ω emotional continuity backend (OpenAI only)",
-  "type": "module",
   "main": "server.mjs",
+  "type": "module",
   "scripts": {
     "start": "node server.mjs"
   },
   "dependencies": {
     "express": "^4.19.0",
     "cors": "^2.8.5",
-    "openai": "^4.28.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "openai": "^4.57.0"
   }
 }
