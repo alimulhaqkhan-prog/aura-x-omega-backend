@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
@@ -6,12 +5,10 @@ import OpenAI from "openai";
 const app = express();
 const port = process.env.PORT || 10000;
 
-// ------------ CONFIG -------------
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY, // Render env vars me set karein
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Allowed origin for CORS (aap apna GitHub Pages URL daal dein)
 const allowedOrigin =
   process.env.ALLOWED_ORIGIN || "https://haqkhan-prog.github.io";
 
@@ -22,12 +19,10 @@ app.use(
 );
 app.use(express.json({ limit: "1mb" }));
 
-// Test route
 app.get("/", (req, res) => {
   res.send("AURA-X Ω backend is running ✅");
 });
 
-// ------------ MAIN API -------------
 app.post("/api/react", async (req, res) => {
   try {
     const { tm, analysis, state, faithLens, model } = req.body || {};
@@ -101,7 +96,6 @@ ${JSON.stringify(analysis || {}, null, 2)}
   }
 });
 
-// ------------ START -------------
 app.listen(port, () => {
   console.log(`AURA-X Ω backend listening on port ${port}`);
 });
