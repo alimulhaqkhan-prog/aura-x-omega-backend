@@ -1,77 +1,107 @@
 // server.js
-const express = require("express");
-const cors = require("cors");
+import express from "express";
+import cors from "cors";
+import OpenAI from "openai";
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const port = process.env.PORT || 10000;
 
-// Render PORT
-const PORT = process.env.PORT || 10000;
-
-// OpenAI key from env
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
-// Simple health check
-app.get("/", (req, res) => {
-  res.send("AURA-X backend OK ✅");
+// ------------ CONFIG -------------
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY, // Render env vars me set karein
 });
 
-// Main LLM endpoint
-app.post("/api/ask", async (req, res) => {
-  const { message } = req.body || {};
+// Allowed origin for CORS (aap apna GitHub Pages URL daal dein)
+const allowedOrigin =
+  process.env.ALLOWED_ORIGIN || "https://haqkhan-prog.github.io";
 
-  if (!message) {
-    return res.status(400).json({ error: "Missing 'message' in body" });
-  }
+app.use(
+  cors({
+    origin: allowedOrigin,
+  })
+);
+app.use(express.json({ limit: "1mb" }));
 
-  if (!OPENAI_API_KEY) {
-    return res
-      .status(500)
-      .json({ error: "OPENAI_API_KEY not set in environment" });
-  }
+// Test route
+app.get("/", (req, res) => {
+  res.send("AURA-X Ω backend is running ✅");
+});
 
+// ------------ MAIN API -------------
+app.post("/api/react", async (req, res) => {
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4.1-mini", // ya jo model aap use karna chahein
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are AURA-X Ω, an emotional continuity reactor. Reply short, gentle and emotionally aware.",
-          },
-          { role: "user", content: message },
-        ],
-        temperature: 0.7,
-      }),
+    const { tm, analysis, state, faithLens, model } = req.body || {};
+
+    const {
+      TM = 0.35,
+      BMvalue = 0.55,
+      D = 0,
+      Csum = 0.05,
+      lambdaFaith = 0,
+      lambdaSys = 0.02,
+      E0 = 0,
+    } = state || {};
+
+    const chosenModel = model || "gpt-4o-mini";
+
+    const systemPrompt = `
+You are AURA-X Ω – an emotional continuity reactor built on the equation
+E₀ = tanh(TM × BM − D + λ_faith + λ_sys + ΣCₜ).
+
+Your job:
+- Read the user's TM (current text input).
+- Use the provided numeric state (TM, BM, D, λ_faith, λ_sys, ΣCₜ, E₀).
+- Return ONE short encouragement/analysis paragraph (max ~5 sentences).
+- Stay calm, kind, grounded, and ethically safe.
+- Do NOT mention the equation directly unless user asks.
+- Never give medical, legal, or financial instructions; only emotional reflections.
+- Faith lens (if any): ${faithLens || "None"}.
+`;
+
+    const userPrompt = `
+TM text:
+${tm}
+
+Current emotional parameters:
+TM=${TM.toFixed(2)}, BM=${BMvalue.toFixed(2)}, D=${D.toFixed(2)},
+λ_faith=${lambdaFaith.toFixed(2)}, λ_sys=${lambdaSys.toFixed(2)}, ΣCₜ=${Csum.toFixed(
+      2
+    )}, E₀=${E0.toFixed(2)}
+
+Seed analysis flags:
+${JSON.stringify(analysis || {}, null, 2)}
+`;
+
+    const completion = await openai.chat.completions.create({
+      model: chosenModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.6,
+      max_tokens: 250,
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      console.error("OpenAI API error:", text);
-      return res
-        .status(500)
-        .json({ error: "OpenAI API error", details: text.slice(0, 300) });
-    }
-
-    const data = await response.json();
     const reply =
-      data.choices?.[0]?.message?.content?.trim() ||
-      "I could not generate a reply, but your TM is still stored.";
+      completion.choices?.[0]?.message?.content?.trim() ||
+      "The emotional reactor is online, but I couldn't generate a detailed response this time.";
 
-    res.json({ reply });
+    res.json({
+      ok: true,
+      reply,
+      modelUsed: chosenModel,
+    });
   } catch (err) {
-    console.error("Server error:", err);
-    res.status(500).json({ error: "Server error", details: err.message });
+    console.error("Error in /api/react:", err);
+    res.status(500).json({
+      ok: false,
+      error: "Backend error while talking to LLM.",
+      detail: err.message || String(err),
+    });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`AURA-X backend running on port ${PORT}`);
+// ------------ START -------------
+app.listen(port, () => {
+  console.log(`AURA-X Ω backend listening on port ${port}`);
 });
