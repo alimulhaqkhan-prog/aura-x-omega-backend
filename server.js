@@ -1,11 +1,8 @@
-// AURA-X Ω — Emotional Reactor Backend
-// Providers: OpenAI, Anthropic, Gemini, OpenRouter (multi-vendor)
+// AURA-X Ω — Simple OpenAI backend (single LLM: GPT-4.1 / GPT-4o)
 
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
-import Anthropic from "@anthropic-ai/sdk";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const app = express();
 app.use(cors());
@@ -13,20 +10,12 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// ---- Clients ----
+// ---- OpenAI client ----
 const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-const anthropic = process.env.ANTHROPIC_API_KEY
-  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  : null;
-
-const genAI = process.env.GEMINI_API_KEY
-  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-  : null;
-
-// ---- Helpers ----
+// simple helper for local emotional drift (optional)
 function basicSentiment(text) {
   const t = (text || "").toLowerCase();
   let s = 0;
@@ -39,30 +28,16 @@ function basicSentiment(text) {
   return s;
 }
 
-function mapClaudeModel(llmModel) {
-  if (llmModel === "claude-3.5-opus") {
-    return "claude-3-5-opus-latest";
-  }
-  return "claude-3-5-sonnet-latest";
-}
-
-// NOTE: yahan IDs example hain; aap OpenRouter docs ke mutabiq
-// inhe adjust kar sakte hain.
-function mapOpenRouterModel(llmModel) {
-  const map = {
-    "mistral-large": "mistral-large",
-    "command-r-plus": "command-r-plus",
-    "grok-2": "grok-2",
-    "llama-3-70b-instruct": "llama-3-70b-instruct",
-    "qwen-2-72b": "qwen-2-72b",
-    "deepseek-coder-v2": "deepseek-coder-v2"
-  };
-  return map[llmModel] || "mistral-large";
-}
-
-// ---- MAIN ROUTE ----
+// ---- MAIN ROUTE (same path your frontend uses) ----
 app.post("/api/react", async (req, res) => {
   try {
+    if (!openai) {
+      return res.json({
+        reply:
+          "OPENAI_API_KEY missing on server. Please set it in Render environment variables."
+      });
+    }
+
     const {
       userText = "",
       seedReply = "",
@@ -75,10 +50,10 @@ app.post("/api/react", async (req, res) => {
       lambdaSys = 0.02,
       E0 = 0,
       faithLens = "None",
-      llmModel = "gpt-4.1"
+      llmModel = "gpt-4.1" // front-end se aa raha hai
     } = req.body || {};
 
-    // Local emotional drift
+    // --- local emotional calculation ---
     const score = basicSentiment(userText);
     const drift = score * 0.1 + (analysis.sentiment || 0) * 0.15;
     const E0_new = Math.max(-1, Math.min(1, E0 + drift));
@@ -88,13 +63,18 @@ app.post("/api/react", async (req, res) => {
       E0_new < -0.15 ? "Negative" :
       "Neutral";
 
+    // seed-only fallback prompt
     let faithMessage = "";
     if (faithLens && faithLens !== "None") {
       faithMessage = `\n[Faith lens active: ${faithLens}]`;
     }
 
+    // Sirf OpenAI ke liye prompt
+    const modelId =
+      llmModel && llmModel.startsWith("gpt-4") ? llmModel : "gpt-4.1";
+
     const basePrompt = `
-You are AURA-X Ω — an emotional continuity agent.
+You are AURA-X Ω — an emotional continuity assistant.
 
 User message: "${userText}"
 
@@ -107,128 +87,57 @@ Current emotional state:
 
 Your job:
 1. Read the seed reply.
-2. Continue the emotional & ethical tone.
-3. Give a concise, psychologically-respectful reflection (5–7 lines).
-4. Do NOT break role; you are AURA-X Ω.
-5. Do NOT overwrite the seed reply; extend or refine it.
+2. Keep the same emotional & ethical tone.
+3. Reply in 5–7 short lines (Urdu or English based on user text).
+4. You are AURA-X Ω, do not break character.
+5. Don't repeat the seed reply fully; extend or refine it.
 
 Seed reply:
 "${seedReply}"
 `.trim();
 
-    const isClaude = llmModel.startsWith("claude-");
-    const isOpenAI = llmModel.startsWith("gpt-");
-    const isGemini = llmModel.startsWith("gemini-");
-    const isOpenRouter = !isClaude && !isOpenAI && !isGemini;
-
+    // ---- Call OpenAI (Responses API) ----
     let llmReply = "";
-    let engineLabel = llmModel;
 
-    // ---- LLM routing ----
     try {
-      if (isClaude && anthropic) {
-        // CLAUDE 3.5
-        const modelId = mapClaudeModel(llmModel);
-        const msg = await anthropic.messages.create({
-          model: modelId,
-          max_tokens: 400,
-          messages: [
-            {
-              role: "user",
-              content: [{ type: "text", text: basePrompt }]
-            }
-          ]
-        });
-        llmReply = msg.content?.[0]?.text || "Claude did not return content.";
-        engineLabel = `Anthropic – ${modelId}`;
+      const response = await openai.responses.create({
+        model: modelId, // "gpt-4.1" or "gpt-4o"
+        input: basePrompt
+      });
 
-      } else if (isOpenAI && openai) {
-        // GPT-4.x via Responses API
-        const resp = await openai.responses.create({
-          model: llmModel, // "gpt-4.1" or "gpt-4o"
-          input: basePrompt
-        });
-        llmReply =
-          resp.output?.[0]?.content?.[0]?.text ||
-          "GPT model did not return content.";
-        engineLabel = `OpenAI – ${llmModel}`;
-
-      } else if (isGemini && genAI) {
-        // GEMINI 1.5 PRO
-        const model = genAI.getGenerativeModel({ model: llmModel });
-        const result = await model.generateContent(basePrompt);
-        llmReply = result.response.text() || "Gemini returned empty content.";
-        engineLabel = `Google – ${llmModel}`;
-
-      } else if (isOpenRouter && process.env.OPENROUTER_API_KEY) {
-        // OPENROUTER multi-vendor (Mistral, Cohere, Grok, Qwen, DeepSeek, etc.)
-        const modelId = mapOpenRouterModel(llmModel);
-
-        const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-            // optional but recommended:
-            "HTTP-Referer": "https://haqkhan-prog.github.io",
-            "X-Title": "AURA-X Omega Emotional Reactor"
-          },
-          body: JSON.stringify({
-            model: modelId,
-            messages: [
-              { role: "user", content: basePrompt }
-            ]
-          })
-        });
-
-        if (!resp.ok) {
-          throw new Error("OpenRouter HTTP " + resp.status);
-        }
-
-        const data = await resp.json();
-        llmReply =
-          data.choices?.[0]?.message?.content ||
-          "OpenRouter model did not return content.";
-        engineLabel = `OpenRouter – ${modelId}`;
-
-      } else {
-        // No provider configured
-        llmReply =
-          "No matching LLM provider/API key configured. Using seed-only emotional reactor.\n\n" +
-          seedReply;
-        engineLabel = "Seed-only (no external LLM)";
-      }
-    } catch (llmErr) {
-      console.error("LLM error:", llmErr);
       llmReply =
-        "LLM backend error, falling back to seed-only emotional reply.\n\n" +
+        response.output?.[0]?.content?.[0]?.text ||
+        "GPT-4 did not return any content.";
+    } catch (llmErr) {
+      console.error("OpenAI error:", llmErr);
+      llmReply =
+        "OpenAI backend error, using local seed-only emotional reply.\n\n" +
         seedReply;
     }
 
-    // ---- Final combined reply ----
-    const combinedReply =
+    const finalReply =
       llmReply +
-      `\n\n[Local emotional continuity]` +
+      `\n\n[Local AURA-X Ω backend note]` +
       `\n• Approx E₀: ${E0_new.toFixed(2)}` +
       `\n• Polarity: ${polarity}` +
-      `\n• Engine: ${engineLabel}` +
+      `\n• Engine: OpenAI – ${modelId}` +
       faithMessage;
 
-    return res.json({ reply: combinedReply });
+    return res.json({ reply: finalReply });
   } catch (err) {
-    console.error("Backend fatal error:", err);
+    console.error("Fatal backend error:", err);
     return res.json({
       reply:
-        "Backend recovered from a fatal error. Using fallback emotional seed-only mode."
+        "Backend fatal error. Falling back to basic local emotional mode; please try again."
     });
   }
 });
 
 // Health check
 app.get("/", (req, res) => {
-  res.send("AURA-X Ω backend (OpenAI + Claude + Gemini + OpenRouter) is LIVE.");
+  res.send("AURA-X Ω simple OpenAI backend is LIVE.");
 });
 
 app.listen(PORT, () => {
-  console.log("AURA-X Ω backend running on port", PORT);
+  console.log("AURA-X Ω backend (OpenAI only) running on port", PORT);
 });
