@@ -1,15 +1,17 @@
 {
-  "name": "aura-x-omega-backend",
+  "name": "aurax-backend",
   "version": "1.0.0",
-  "description": "AURA-X Ω emotional continuity backend (OpenAI only)",
-  "main": "server.mjs",
+  "description": "AURA-X Omega emotional continuity backend",
+  "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.0",
     "cors": "^2.8.5",
-    "openai": "^4.57.0"
+    "openai": "^4.0.0",
+    "@anthropic-ai/sdk": "^1.0.0",
+    "@google/generative-ai": "^0.11.0"
   }
 }
