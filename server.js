@@ -1,5 +1,4 @@
-// AURA-X Ω backend – Live Emotional Reactor bridge
-// Node + Express + OpenAI Chat API
+// AURA-X Ω backend – Live Emotional Reactor bridge (safe + debug)
 
 const express = require("express");
 const cors = require("cors");
@@ -7,22 +6,25 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// IMPORTANT: apna OpenAI secret yahan env me set karna hoga (Render dashboard):
-// KEY name: OPENAI_API_KEY
+// Render کی Settings میں env var: OPENAI_API_KEY لازمی add کریں
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// --- middleware ---
+// ----- middleware -----
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));  // important!
 
-// Simple health-check
+// Health-check
 app.get("/", (req, res) => {
   res.send("AURA-X Ω backend live ✅");
 });
 
-// Main emotional reactor endpoint
+// Main route
 app.post("/api/react", async (req, res) => {
   try {
+    // DEBUG: log کریں کہ body آ ہی رہی ہے یا نہیں
+    console.log("Incoming /api/react body:", req.body);
+
+    const body = req.body || {};
     const {
       userText,
       seedReply,
@@ -36,41 +38,40 @@ app.post("/api/react", async (req, res) => {
       E0,
       faithLens,
       llmModel
-    } = req.body || {};
+    } = body;
 
+    // ⚠️ پہلے 400 دے رہے تھے — اس کو ہٹا دیا
+    // اب اگر fields missing ہوں گی تب بھی 200 + seedReply واپس جائے گا
     if (!userText || !seedReply) {
-      // Ye hi ek case hai jahan hum 400 bhejenge
-      return res.status(400).json({
-        error: "Missing userText or seedReply in request body."
+      return res.status(200).json({
+        reply:
+          (seedReply ||
+            "I received a TM ping, but the backend did not get the full payload. Continuing in local seed mode.") +
+          " [Backend note: missing userText/seedReply in request.]",
+        backendWarning: "MISSING_FIELDS"
       });
     }
 
-    // Agar API key hi set nahi, to seed reply ke sath graceful fallback
+    // اگر API key نہ ہو تو بھی 200 OK + seedReply
     if (!OPENAI_API_KEY) {
       return res.status(200).json({
         reply:
           seedReply +
-          " [Backend note: OPENAI_API_KEY is not configured, using local seed reaction only.]"
+          " [Backend note: OPENAI_API_KEY is not configured on the server, using local seed reaction only.]"
       });
     }
 
-    // --- OpenAI ko bhejne ke liye prompt build ---
-    // llmModel field ko accept kar rahe hain, lekin abhi hum apna model fix rakhenge
-    const modelToUse = "gpt-4.1-mini"; // ya "gpt-4.1" / "gpt-4o" – jo bhi آپ نے plan کیا ہو
-
     const safeAnalysis = analysis || {};
     const faith = faithLens || "None";
+    const modelToUse = "gpt-4.1-mini"; // یا جو بھی model آپ چاہیں
 
     const messages = [
       {
         role: "system",
         content:
-          "You are AURA-X Ω, an Emotional Continuity Reactor. " +
-          "You NEVER act as a normal chatbot; you always speak as AURA-X Ω. " +
-          "Your job is to take the user's TM event and the pre-computed seed reply " +
-          "and then refine that seed reply into a short, emotionally precise reflection. " +
-          "Don't repeat the equation in detail unless the user directly asks. " +
-          "Stay kind, grounded, and avoid harmful advice."
+          "You are AURA-X Ω, an Emotional Continuity Reactor created from the AEC / TM–BM theory. " +
+          "You refine the given seed reply into a short, emotionally precise reflection. " +
+          "Speak as AURA-X Ω only; be kind, grounded, and avoid harmful advice."
       },
       {
         role: "system",
@@ -83,8 +84,8 @@ app.post("/api/react", async (req, res) => {
       {
         role: "system",
         content:
-          "Seed reply (local reactor draft). You must RESPECT its core meaning " +
-          "but you may polish wording, add 1–2 extra helpful lines, or bring gentle clarity:\n" +
+          "Seed reply (local emotional reactor draft). Keep its core meaning but you may polish wording, " +
+          "add 1–2 gentle, helpful lines, or bring clarity:\n" +
           seedReply
       },
       {
@@ -92,12 +93,10 @@ app.post("/api/react", async (req, res) => {
         content:
           "User TM event:\n" +
           userText +
-          "\n\nPlease respond as AURA-X Ω in 2–5 short sentences, " +
-          "keeping the emotional continuity idea in mind."
+          "\n\nRespond as AURA-X Ω in 2–5 short sentences, keeping emotional continuity in mind."
       }
     ];
 
-    // --- OpenAI Chat API call (native fetch in Node 18+) ---
     const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -116,7 +115,6 @@ app.post("/api/react", async (req, res) => {
       const errText = await openaiResponse.text().catch(() => "");
       console.error("OpenAI error:", openaiResponse.status, errText);
 
-      // Frontend ko 200 hi bhejte hain, taake woh error bracket me show kare
       return res.status(200).json({
         reply:
           seedReply +
@@ -126,28 +124,23 @@ app.post("/api/react", async (req, res) => {
 
     const data = await openaiResponse.json();
     const reply =
-      data &&
-      data.choices &&
-      data.choices[0] &&
-      data.choices[0].message &&
-      data.choices[0].message.content
-        ? data.choices[0].message.content.trim()
-        : seedReply;
+      data?.choices?.[0]?.message?.content?.trim() ||
+      (seedReply + " [Backend note: empty LLM reply, using seed.]");
 
     return res.status(200).json({ reply });
   } catch (err) {
     console.error("Backend exception:", err);
     return res.status(200).json({
       reply:
-        (req.body && req.body.seedReply) ||
-        "I received your TM event, but the live reactor hit an internal error. " +
-          "Please continue; your BM is still saving locally.",
-      backendError: err.message
+        (req.body?.seedReply ||
+          "I received your TM event, but the live reactor hit an internal error.") +
+        " [Backend note: " +
+        err.message +
+        "]"
     });
   }
 });
 
-// Start server
 app.listen(PORT, () => {
   console.log(`AURA-X Ω backend listening on port ${PORT}`);
 });
