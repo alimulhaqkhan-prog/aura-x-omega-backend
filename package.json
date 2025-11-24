@@ -1,16 +1,13 @@
 {
   "name": "aura-x-omega-backend",
   "version": "1.0.0",
-  "description": "AURA-X Ω emotional continuity backend (seed + OpenAI LLM)",
   "main": "server.js",
-  "type": "module",
+  "type": "commonjs",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.0",
-    "openai": "^4.67.3"
+    "express": "^4.19.2"
   }
 }
