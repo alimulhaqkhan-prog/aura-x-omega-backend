@@ -1,133 +1,32 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import OpenAI from "openai";
+// AURA-X Ω backend – Live Emotional Reactor bridge
+// Node + Express + OpenAI Chat API
 
-dotenv.config();
+const express = require("express");
+const cors = require("cors");
 
 const app = express();
+const PORT = process.env.PORT || 10000;
+
+// IMPORTANT: apna OpenAI secret yahan env me set karna hoga (Render dashboard):
+// KEY name: OPENAI_API_KEY
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+// --- middleware ---
 app.use(cors());
 app.use(express.json());
 
-// ------------ OpenAI client (optional) ------------
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-let openaiClient = null;
-
-if (OPENAI_API_KEY) {
-  openaiClient = new OpenAI({ apiKey: OPENAI_API_KEY });
-  console.log("✅ OpenAI client initialised");
-} else {
-  console.log("⚠️ OPENAI_API_KEY not set. Backend will return seedReply only.");
-}
-
-// ------------ Helper: build system prompt ------------
-function buildSystemPrompt(payload) {
-  const {
-    tm,
-    bm,
-    D,
-    Csum,
-    lambdaFaith,
-    lambdaSys,
-    E0,
-    faithLens
-  } = payload || {};
-
-  return `
-You are **AURA-X Ω**, an *emotional continuity reactor*.
-
-Your job:
-- Respect the user's existing seed_reply (it already contains safe advice).
-- Slightly refine / polish it, keep the **same meaning**.
-- Use maximum 2–3 short paragraphs.
-- Stay gentle, non-medical, non-therapy. 
-- Never claim to cure depression, epilepsy, trauma, etc.
-
-Internal emotional snapshot (from the front-end equation):
-- TM  = ${Number(tm ?? 0).toFixed(2)}
-- BM  = ${Number(bm ?? 0).toFixed(2)}
-- D   = ${Number(D ?? 0).toFixed(2)}
-- ΣCₜ = ${Number(Csum ?? 0).toFixed(2)}
-- λ_faith = ${Number(lambdaFaith ?? 0).toFixed(2)}
-- λ_sys   = ${Number(lambdaSys ?? 0).toFixed(2)}
-- E₀      = ${Number(E0 ?? 0).toFixed(2)}
-
-Faith lens selected by user: ${faithLens || "None"}.
-
-Rules:
-- If faith lens is set, you may add 1 چھوٹی جملہ اس faith کے انداز میں soft encouragement کے طور پر۔
-- اگر faith lens "None" ہو تو صرف universal ethics استعمال کریں۔
-- ہمشہ احترام، احتیاط اور kindness maintain کریں۔
-`;
-}
-
-// ------------ Health / safety guard ------------
-function containsCrisisWords(text) {
-  if (!text) return false;
-  const lower = text.toLowerCase();
-  const triggers = [
-    "suicide",
-    "kill myself",
-    "end my life",
-    "خودکشی",
-    "اپنی جان لے",
-    "زندگی ختم"
-  ];
-  return triggers.some((w) => lower.includes(w));
-}
-
-// ------------ Routes ------------
-
-// Simple check (Render health check)
+// Simple health-check
 app.get("/", (req, res) => {
-  res.send("AURA-X Ω backend is alive ✅");
+  res.send("AURA-X Ω backend live ✅");
 });
 
-// Main emotional reaction route
+// Main emotional reactor endpoint
 app.post("/api/react", async (req, res) => {
-  const body = req.body || {};
-  const {
-    userText = "",
-    seedReply = "",
-    analysis = {},
-    tm,
-    bm,
-    D,
-    Csum,
-    lambdaFaith,
-    lambdaSys,
-    E0,
-    faithLens,
-    llmModel
-  } = body;
-
-  // 1) Basic safety: اگر کوئی بہت خطرناک بات لکھے تو seedReply override کر دو
-  if (containsCrisisWords(userText)) {
-    const crisisReply =
-      "میں تمہاری بات سن رہا ہوں اور محسوس ہو رہا ہے کہ تم بہت شدید emotional درد میں ہو۔ " +
-      "میں ایک AI ہوں، اس لئے ایمرجنسی مدد یا تھراپی نہیں دے سکتا، لیکن براہِ کرم کسی قریبی انسان، " +
-      "فیملی ممبر، دوست یا مستند ڈاکٹر/معالج سے فوراً رابطہ کرو۔ اگر خطرہ فوری ہو تو اپنے ملک کی ایمرجنسی ہیلپ لائن استعمال کرو۔";
-    return res.json({
-      reply: crisisReply,
-      provider: null,
-      error: null
-    });
-  }
-
-  // 2) Default answer = seedReply (front-end already بنایا ہوا)
-  let finalReply = seedReply || "AURA-X Ω seed reply.";
-
-  // اگر OpenAI key ہی نہیں ہے تو سیدھا seedReply واپس کر دو
-  if (!openaiClient) {
-    return res.json({
-      reply: finalReply + " [Backend: no OPENAI_API_KEY configured, using seed-only mode.]",
-      provider: null,
-      error: "NO_OPENAI_KEY"
-    });
-  }
-
   try {
-    const systemPrompt = buildSystemPrompt({
+    const {
+      userText,
+      seedReply,
+      analysis,
       tm,
       bm,
       D,
@@ -136,59 +35,119 @@ app.post("/api/react", async (req, res) => {
       lambdaSys,
       E0,
       faithLens,
-      analysis
+      llmModel
+    } = req.body || {};
+
+    if (!userText || !seedReply) {
+      // Ye hi ek case hai jahan hum 400 bhejenge
+      return res.status(400).json({
+        error: "Missing userText or seedReply in request body."
+      });
+    }
+
+    // Agar API key hi set nahi, to seed reply ke sath graceful fallback
+    if (!OPENAI_API_KEY) {
+      return res.status(200).json({
+        reply:
+          seedReply +
+          " [Backend note: OPENAI_API_KEY is not configured, using local seed reaction only.]"
+      });
+    }
+
+    // --- OpenAI ko bhejne ke liye prompt build ---
+    // llmModel field ko accept kar rahe hain, lekin abhi hum apna model fix rakhenge
+    const modelToUse = "gpt-4.1-mini"; // ya "gpt-4.1" / "gpt-4o" – jo bhi آپ نے plan کیا ہو
+
+    const safeAnalysis = analysis || {};
+    const faith = faithLens || "None";
+
+    const messages = [
+      {
+        role: "system",
+        content:
+          "You are AURA-X Ω, an Emotional Continuity Reactor. " +
+          "You NEVER act as a normal chatbot; you always speak as AURA-X Ω. " +
+          "Your job is to take the user's TM event and the pre-computed seed reply " +
+          "and then refine that seed reply into a short, emotionally precise reflection. " +
+          "Don't repeat the equation in detail unless the user directly asks. " +
+          "Stay kind, grounded, and avoid harmful advice."
+      },
+      {
+        role: "system",
+        content:
+          "Emotional state snapshot:\n" +
+          `TM=${tm}, BM=${bm}, D=${D}, ΣCₜ=${Csum}, λ_faith=${lambdaFaith}, λ_sys=${lambdaSys}, E₀=${E0}.\n` +
+          `Faith lens: ${faith}.\n` +
+          `Local analysis: ${JSON.stringify(safeAnalysis)}`
+      },
+      {
+        role: "system",
+        content:
+          "Seed reply (local reactor draft). You must RESPECT its core meaning " +
+          "but you may polish wording, add 1–2 extra helpful lines, or bring gentle clarity:\n" +
+          seedReply
+      },
+      {
+        role: "user",
+        content:
+          "User TM event:\n" +
+          userText +
+          "\n\nPlease respond as AURA-X Ω in 2–5 short sentences, " +
+          "keeping the emotional continuity idea in mind."
+      }
+    ];
+
+    // --- OpenAI Chat API call (native fetch in Node 18+) ---
+    const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: modelToUse,
+        messages,
+        temperature: 0.6,
+        max_tokens: 350
+      })
     });
 
-    // ابھی کیلئے model hard-code رکھو، UI سے آنے والا llmModel ignore کر رہے ہیں
-    const modelName = "gpt-4.1-mini";
+    if (!openaiResponse.ok) {
+      const errText = await openaiResponse.text().catch(() => "");
+      console.error("OpenAI error:", openaiResponse.status, errText);
 
-    const completion = await openaiClient.chat.completions.create({
-      model: modelName,
-      messages: [
-        { role: "system", content: systemPrompt },
-        // User text so LLM کو context مل جائے
-        {
-          role: "user",
-          content:
-            "User_text:\n" +
-            (userText || "User نے کوئی extra text نہیں دیا، صرف TM metadata بھیجا ہے۔")
-        },
-        // seed reply کو previous assistant message کی طرح دو
-        {
-          role: "assistant",
-          content:
-            "Existing_seed_reply (improve gently, keep same meaning, max ~3 short paragraphs):\n" +
-            (seedReply || "No seed reply, so please just give a short, neutral, kind reaction.")
-        }
-      ],
-      temperature: 0.5,
-      max_tokens: 350
-    });
+      // Frontend ko 200 hi bhejte hain, taake woh error bracket me show kare
+      return res.status(200).json({
+        reply:
+          seedReply +
+          ` [Backend note: OpenAI error ${openaiResponse.status}. Falling back to local seed.]`
+      });
+    }
 
-    const text =
-      completion.choices?.[0]?.message?.content?.trim() || finalReply;
+    const data = await openaiResponse.json();
+    const reply =
+      data &&
+      data.choices &&
+      data.choices[0] &&
+      data.choices[0].message &&
+      data.choices[0].message.content
+        ? data.choices[0].message.content.trim()
+        : seedReply;
 
-    finalReply = text;
-
-    return res.json({
-      reply: finalReply,
-      provider: "openai",
-      error: null
-    });
+    return res.status(200).json({ reply });
   } catch (err) {
-    console.error("OpenAI error:", err.message);
-    return res.json({
+    console.error("Backend exception:", err);
+    return res.status(200).json({
       reply:
-        finalReply +
-        " [AURA-X Ω backend error, falling back to local seed reply. You can continue chatting — BM will still save locally.]",
-      provider: "openai",
-      error: err.message
+        (req.body && req.body.seedReply) ||
+        "I received your TM event, but the live reactor hit an internal error. " +
+          "Please continue; your BM is still saving locally.",
+      backendError: err.message
     });
   }
 });
 
-// ------------ Start server ------------
-const PORT = process.env.PORT || 10000;
+// Start server
 app.listen(PORT, () => {
-  console.log(`🚀 AURA-X Ω backend listening on port ${PORT}`);
+  console.log(`AURA-X Ω backend listening on port ${PORT}`);
 });
